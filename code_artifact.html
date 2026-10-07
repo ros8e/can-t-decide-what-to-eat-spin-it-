@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>今天吃什麼轉盤</title>
+    <!-- 引入碎紙花特效庫 -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <style>
+        body {
+            font-family: 'Microsoft JhengHei', sans-serif;
+            background-color: #fce4ec;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        h1 {
+            color: #d81b60;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .wheel-container {
+            position: relative;
+            width: 400px;
+            height: 400px;
+            margin-bottom: 30px;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            box-shadow: 0 0 20px rgba(0,0,0,0.2);
+            transition: transform 5s cubic-bezier(0.25, 0.1, 0.25, 1);
+        }
+
+        .pointer {
+            position: absolute;
+            top: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 40px;
+            height: 50px;
+            background-color: #e91e63;
+            clip-path: polygon(50% 100%, 0 0, 100% 0);
+            z-index: 10;
+            filter: drop-shadow(0px 4px 2px rgba(0,0,0,0.3));
+        }
+
+        .spin-btn {
+            background-color: #d81b60;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 24px;
+            font-weight: bold;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 6px 0 #ad1457, 0 10px 10px rgba(0,0,0,0.2);
+            transition: all 0.1s;
+        }
+
+        .spin-btn:active {
+            transform: translateY(6px);
+            box-shadow: 0 0px 0 #ad1457, 0 4px 4px rgba(0,0,0,0.2);
+        }
+
+        .spin-btn:disabled {
+            background-color: #ccc;
+            box-shadow: 0 6px 0 #999;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* 結果彈出視窗 */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            animation: fadeIn 0.3s;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            transform: scale(0.8);
+            animation: popUp 0.3s forwards;
+        }
+
+        .modal-content h2 {
+            margin: 0 0 20px 0;
+            color: #d81b60;
+            font-size: 36px;
+        }
+
+        .close-btn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 25px;
+            font-size: 18px;
+            border-radius: 25px;
+            cursor: pointer;
+        }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes popUp { to { transform: scale(1); } }
+
+    </style>
+</head>
+<body>
+
+    <h1>🍽️ 今天吃什麼轉盤 🍽️</h1>
+
+    <div class="wheel-container">
+        <div class="pointer"></div>
+        <canvas id="wheelCanvas" width="500" height="500"></canvas>
+    </div>
+
+    <button class="spin-btn" id="spinBtn">轉動吧！</button>
+
+    <!-- 結果視窗 -->
+    <div class="modal" id="resultModal">
+        <div class="modal-content">
+            <h2 id="resultText">滷肉飯</h2>
+            <button class="close-btn" onclick="closeModal()">太棒了，就吃這個！</button>
+        </div>
+    </div>
+
+    <script>
+        // 20個美食選項
+        const options = [
+            "滷肉飯", "牛肉麵", "水餃鍋貼", "麥當勞", "肯德基", 
+            "義大利麵", "咖哩飯", "泰式料理", "爭鮮壽司", "鐵板燒", 
+            "健康餐盒", "炒飯炒麵", "披薩", "韓式料理", "小火鍋", 
+            "涼麵", "排骨便當", "港式燒臘", "日式拉麵", "隨便都可以"
+        ];
+
+        // 定義轉盤的顏色 (四色循環)
+        const colors = ["#FFCDD2", "#F8BBD0", "#E1BEE7", "#D1C4E9"];
+
+        const canvas = document.getElementById("wheelCanvas");
+        const ctx = canvas.getContext("2d");
+        const spinBtn = document.getElementById("spinBtn");
+        const arc = Math.PI / (options.length / 2);
+        
+        let startAngle = 0;
+        let spinTimeout = null;
+        let spinArcStart = 10;
+        let spinTime = 0;
+        let spinTimeTotal = 0;
+
+        // 音效系統 (Web Audio API)
+        let audioCtx;
+        
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        // 播放滴答聲
+        function playTickSound() {
+            if (!audioCtx) return;
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.type = "sine";
+            oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + 0.05);
+        }
+
+        // 播放歡呼/成功音效
+        function playWinSound() {
+            if (!audioCtx) return;
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.type = "triangle";
+            
+            oscillator.frequency.setValueAtTime(440, audioCtx.currentTime); // A4
+            oscillator.frequency.setValueAtTime(554.37, audioCtx.currentTime + 0.1); // C#5
+            oscillator.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.2); // E5
+            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime + 0.3); // A5
+            
+            gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1);
+            
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + 1);
+        }
+
+        // 繪製轉盤
+        function drawWheel() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const outsideRadius = 240;
+            const textRadius = 180;
+            const insideRadius = 20;
+
+            for (let i = 0; i < options.length; i++) {
+                const angle = startAngle + i * arc;
+                ctx.fillStyle = colors[i % colors.length];
+
+                ctx.beginPath();
+                ctx.arc(250, 250, outsideRadius, angle, angle + arc, false);
+                ctx.arc(250, 250, insideRadius, angle + arc, angle, true);
+                ctx.fill();
+
+                ctx.save();
+                ctx.fillStyle = "#333";
+                // 調整字體大小以適應 20 個選項
+                ctx.font = "bold 16px 'Microsoft JhengHei'"; 
+                const text = options[i];
+                ctx.translate(250 + Math.cos(angle + arc / 2) * textRadius, 250 + Math.sin(angle + arc / 2) * textRadius);
+                ctx.rotate(angle + arc / 2 + Math.PI / 2);
+                ctx.fillText(text, -ctx.measureText(text).width / 2, 0);
+                ctx.restore();
+            }
+        }
+
+        let lastTickAngle = 0;
+
+        function rotateWheel() {
+            spinTime += 30;
+            if (spinTime >= spinTimeTotal) {
+                stopRotateWheel();
+                return;
+            }
+            const spinAngle = spinAngleStart - easeOut(spinTime, 0, spinAngleStart, spinTimeTotal);
+            startAngle += (spinAngle * Math.PI / 180);
+            
+            // 計算是否經過一個區塊來發出滴答聲
+            const currentSlice = Math.floor((startAngle + Math.PI/2) / arc);
+            if (currentSlice !== lastTickAngle) {
+                playTickSound();
+                lastTickAngle = currentSlice;
+            }
+
+            drawWheel();
+            spinTimeout = setTimeout(rotateWheel, 30);
+        }
+
+        function stopRotateWheel() {
+            clearTimeout(spinTimeout);
+            const degrees = startAngle * 180 / Math.PI + 90;
+            const arcd = arc * 180 / Math.PI;
+            const index = Math.floor((360 - degrees % 360) / arcd);
+            
+            const result = options[index];
+            
+            // 觸發音效與視覺特效
+            playWinSound();
+            confetti({
+                particleCount: 150,
+                spread: 80,
+                origin: { y: 0.6 },
+                colors: ['#FFCDD2', '#d81b60', '#4CAF50', '#FFEB3B']
+            });
+
+            // 顯示結果彈窗
+            setTimeout(() => {
+                document.getElementById("resultText").innerText = result;
+                document.getElementById("resultModal").style.display = "flex";
+                spinBtn.disabled = false;
+                spinBtn.innerText = "轉動吧！";
+            }, 500);
+        }
+
+        function easeOut(t, b, c, d) {
+            const ts = (t /= d) * t;
+            const tc = ts * t;
+            return b + c * (tc + -3 * ts + 3 * t);
+        }
+
+        spinBtn.addEventListener("click", () => {
+            initAudio(); // 初始化音效引擎
+            spinBtn.disabled = true;
+            spinBtn.innerText = "旋轉中...";
+            spinAngleStart = Math.random() * 10 + 10; // 旋轉速度與圈數隨機化
+            spinTime = 0;
+            spinTimeTotal = Math.random() * 2000 + 4000; // 旋轉時間 4~6 秒
+            lastTickAngle = Math.floor((startAngle + Math.PI/2) / arc);
+            rotateWheel();
+        });
+
+        function closeModal() {
+            document.getElementById("resultModal").style.display = "none";
+        }
+
+        // 初始繪製
+        drawWheel();
+    </script>
+</body>
+</html>
